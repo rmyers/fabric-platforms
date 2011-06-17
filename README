@@ -10,10 +10,13 @@ Example
 -------
 
 	from fabricplatforms import platform
-        from fabric import put
-	platform.register('myhost.com')
-	platform.register('mymachost.com', 'darwin-webserver')
+    from fabric import put
+    
+	platform.register('myhost.com', 'linux')
+	platform.register('mymachost.com', 'darwin')
 
+    # use fabric like normal, setup hosts etc...
+    
 	def some_task():
 		platform.mkdir('/tmp/blah', mode=755, parents=True, use_sudo=False)
 		put('/tmp/localfile', '/tmp/blah')
