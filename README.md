@@ -4,6 +4,13 @@ Set of classes which can be used to create fabric scripts easy.
 These allow you manage multiple machines with different operating
 systems with the same commands.
 
+Status
+------
+Currently only the Linux platform class is available. Darwin and
+Solaris are in the works. FreeBSD and NetBSD should be simple 
+and may just work with the linux platform. The sample fabfile.py
+has a few examples on how to use it. Otherwise poke around in
+the source BasePlatform class.
 
 Example
 -------

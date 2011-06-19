@@ -4,6 +4,11 @@ from fabricplatforms import platform
 
 env.hosts = ['localhost']
 
+# platform will try and get the correct os class but you
+# can do this or override the default like:
+# platform.register_platform('dotted.path.to.platform')
+# platform.register('localhost', 'myplatform')
+
 def create_dir():
     platform.mkdir('/tmp/blah')
     platform.move('/tmp/blah', '/tmp/blah2')
