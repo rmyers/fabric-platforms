@@ -1,5 +1,7 @@
+import logging
 
 from fabric.state import env
+from fabric.api import run, settings, hide
 
 from linux import Linux
 from base import PlatformError
@@ -30,28 +32,44 @@ class Platform(object):
         self.PLATFORMS = {}
         self.HOSTS = {}
     
-    def register_platform(self, name, platform):
+    def register_platform(self, platform):
         if isinstance(platform, basestring):
             platform = import_object(platform)
         
-        name = getattr(platform, 'name', platform.__class__.__name__.lower())
+        name = getattr(platform, 'names', platform.__name__.lower())
         self.PLATFORMS[name] = platform()
     
     def register(self, host, platform_name):
         if platform_name not in self.PLATFORMS.iterkeys():
+            logging.error('Available platforms: %s', [x for x in self.PLATFORMS.iterkeys()])
             raise PlatformError("Platform not registered")
         platform = self.PLATFORMS[platform_name]
         self.HOSTS[host] = platform
+    
+    def get_platform_for_host(self, host):
+        try:
+            platform = self.HOSTS[host]
+        except KeyError:
+            # Try to discover the host platform type:
+            with settings(hide('everything'), warn_only=True):
+                output = run('uname -s')
+                if output.failed:
+                    raise PlatformError("Could not determine host type, please register it!")
+                uname = str(output).strip().lower()
+                try:
+                    platform = self.PLATFORMS[uname]
+                    self.register(host, uname)
+                except KeyError:
+                    raise PlatformError("Platform for %s not registered" % uname)
+        return platform
+        
         
     def __getattr__(self, name):
         """Proxies method calls on this connector to the underlying system."""
         try:
             return super(Platform, self).__getattr__(name)
         except AttributeError:
-            try:
-                platform = self.HOSTS[env['host']]
-            except:
-                raise PlatformError("Host not registered")
+            platform = self.get_platform_for_host(env['host'])
             return getattr(platform, name)
            
 platform = Platform()

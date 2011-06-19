@@ -4,7 +4,7 @@ from collections import defaultdict
 
 import os
 
-from fabric.api import run, sudo, cd
+from fabric.api import run, sudo, cd, settings, hide
 
 class PlatformError(Exception):
     pass
@@ -158,13 +158,11 @@ class BasePlatform(object):
         self.execute(self.chgrp_cmd % (recursive, gid, shell_escape(path)))
 
     def chmod(self, path, mode, recursive=False, use_sudo=False):
-        """Changes the permission mode of the specified filesystem path."""
+        """Changes the permission mode of the specified filesystem path.
+        mode can be an int or symbolic mode representation (e.g. g+rw)
+        """
 
         recursive = ('-R' if recursive else '')
-        # mode can be an int or symbolic mode representation (e.g. g+rw).
-        # If we get an int, turn it into octal representation.
-        if isinstance(mode, int):
-            mode = oct(mode)
         self.execute(self.chmod_cmd % (recursive, mode, shell_escape(path)))
 
     def chown(self, path, uid, gid=None, recursive=False, use_sudo=False):
@@ -173,8 +171,10 @@ class BasePlatform(object):
         gid, recursive = (':%s' % gid if gid else ''), ('-R' if recursive else '')
         self.execute(self.chown_cmd % (recursive, uid, gid, shell_escape(path)))
 
-    def hostname(self, channel):
-        self.execute(self.hostname_cmd)
+    def hostname(self, use_sudo=False):
+        with settings(hide('everything'), warn_only=True):
+            hostname = self.execute(self.hostname_cmd)
+        return hostname or "Unknown"
 
     def link(self, target, path, absolute=False, use_sudo=False):
         """Creates the specified symbolic link."""
@@ -205,8 +205,9 @@ class BasePlatform(object):
         """Removes the specified filesystem path."""
         # first test if the file is there.
         cmd = self.test_link_cmd if link else self.test_cmd
-        if self.execute(cmd % shell_escape(path), use_sudo=use_sudo).failed:
-            return
+        with settings(hide('everything'), warn_only=True):
+            if self.execute(cmd % shell_escape(path), use_sudo=use_sudo).failed:
+                return
         recursive, force = ('-r' if recursive else ''), ('-f' if force else '')
         self.execute(self.rm_cmd % (recursive, force, shell_escape(path)), use_sudo=use_sudo)
 
@@ -219,18 +220,22 @@ class BasePlatform(object):
         path = shell_escape(path)
         cmd = self.test_link_cmd if link else self.test_cmd
         # do we even exist?
-        if self.execute(cmd % path, use_sudo=use_sudo).failed:
-            return
+        with settings(hide('everything'), warn_only=True):
+            if self.execute(cmd % path, use_sudo=use_sudo).failed:
+                return
         
-        content = self.execute(self.stat_cmd % path, use_sudo=use_sudo)
+        with settings(hide('everything'), warn_only=True):
+            content = self.execute(self.stat_cmd % path, use_sudo=use_sudo)
         filetype, mode, user, group, values = content.strip().split(':')
-        mode, values = int(mode, 8), [ int(value) for value in values.split(',') ]
+        #mode, values = int(mode, 8), [ int(value) for value in values.split(',') ]
+        values = [ int(value) for value in values.split(',') ]
         if filetype.lower() == 'directory':
             return dirnode(path, mode, user, group, *values)
         elif filetype.lower() == 'regular file':
             return filenode(path, mode, user, group, *values)
         elif filetype.lower() == 'symbolic link':
-            target = self.execute(self.readlink_cmd % path, use_sudo=use_sudo)
+            with settings(hide('everything'), warn_only=True):
+                target = self.execute(self.readlink_cmd % path, use_sudo=use_sudo)
             return filenode(path, mode, user, group, *values, ftype='link', target=target.strip())
         else:
             return filenode(path, mode, user, group, *values, ftype=filetype)
@@ -299,38 +304,33 @@ class BasePlatform(object):
     # Group methods.
     #
 
-    def groupadd(self, name, gid, members=None):
+    def groupadd(self, name, gid, members=[], use_sudo=True):
         """Creates the specified system group."""
-        if members is not None:
-            raise NotImplementedError("Specifing members for groupadd on the"
-                                      " POSIX platform class in not yet"
-                                      " supported.")
-        self.execute(self.groupadd_cmd % (gid, name))
+        self.execute(self.groupadd_cmd % (gid, name), use_sudo=use_sudo)
+        for member in members:
+            self.usermod(member, groups=[name])
 
-    def groupdel(self, name):
+    def groupdel(self, name, use_sudo=True):
         """
         Delete the specified system group.  If the group doesn't exist, then
         do nothing.
         """
         group = self.groupget(name)
         if not group:
-            log.debug('Group: %s does not exist, not deleting' % name)
             return
-        self.execute(self.groupdel_cmd % name)
+        self.execute(self.groupdel_cmd % name, use_sudo=use_sudo)
 
-    def groupget(self, name):
+    def groupget(self, name, use_sudo=True):
         """Gets information on the specified system group."""
 
-        status, content = channel.execute(self.groupget_cmd % name)
-        if status == 0:
-            name, _, gid, users = content.strip().split(':')
-            return groupstruct(name, int(gid), users.split(',') if users else [])
-        elif status == 1:
-            return None
-        else:
-            raise PlatformError(status, content)
+        with settings(hide('everything'), warn_only=True):
+            content = self.execute(self.groupget_cmd % name)
+            if content.failed or not content:
+                return None
+        name, _, gid, users = content.strip().split(':')
+        return groupstruct(name, int(gid), users.split(',') if users else [])
 
-    def groupmod(self, name, gid):
+    def groupmod(self, name, gid, use_sudo=True):
         """Modifies the specified system group."""
 
         self.execute(self.groupmod_cmd % (gid, name))
@@ -349,7 +349,7 @@ class BasePlatform(object):
         details_incorrect = self._attrs_incorrect(group, new_attrs)
         return details_incorrect
 
-    def groupsync(self, name, gid, members=None):
+    def groupsync(self, name, gid, members=None, use_sudo=True):
         """Sync the given system group, creating or modifying if needed.
 
         If members is given, then the group's members will also be checked and
@@ -371,25 +371,27 @@ class BasePlatform(object):
             return True
         return False
 
-    def groups(self, channel):
+    def groups(self, use_sudo=False):
         """Return a dict of all groups: groupname -> [group_struct, ...]"""
-        status, content = channel.execute(self.groups_cmd)
-        if status != 0:
-            raise PlatformError(status, content)
+        with settings(hide('everything'), warn_only=True):
+            content = self.execute(self.groups_cmd, use_sudo=use_sudo)
+            if content.failed:
+                raise PlatformError(content)
 
-        groups = defaultdict(list)
+        groups = {}
         for line in content.splitlines():
             name, _, gid, member_string = line.strip().split(':')
             users = set(member_string.split(',')) if member_string else set()
             group = groupstruct(name, int(gid), users)
-            groups[name].append(group)
+            groups[name] = group
         return groups
 
     #
     # User methods.
     #
 
-    def useradd(self, name, uid, group=None, groups=None, home=None, shell=None, comment=None):
+    def useradd(self, name, uid, group=None, groups=None, home=None, 
+                shell=None, comment=None, use_sudo=True):
         """Creates the specified system user."""
 
         options = []
@@ -404,40 +406,41 @@ class BasePlatform(object):
         if comment:
             options.append('-c "%s"' % comment)
         
-        self.execute(self.useradd_cmd % (uid, ' '.join(options), name))
+        cmd = self.useradd_cmd % (uid, ' '.join(options), name)
+        
+        self.execute(cmd, use_sudo=use_sudo)
 
-    def userdel(self, name):
+    def userdel(self, name, use_sudo=True):
         """
         Delete the specified system user.  If the user doesn't exist, then
         do nothing.
         """
         user = self.userget(name)
         if not user:
-            log.debug('User: %s does not exist, not deleting' % name)
             return
-        self.execute(self.userdel_cmd % name)
+        self.execute(self.userdel_cmd % name, use_sudo=use_sudo)
 
-    def userget(self, name):
+    def userget(self, name, use_sudo=True):
         """Gets information on the specified system user."""
 
-        status, content = channel.execute(self.userget_cmd % name)
-        if status == 0:
-            name, _, uid, gid, comment, home, shell = content.strip().split(':')
-            status, content = channel.execute(self.userget_groups_cmd % name)
-            if status == 0:
-                content = content.strip().split(' ')
-                group, groups = content[ 0 ], set(content[ 1: ])
-            else:
-                raise PlatformError(status, content)
-            return userstruct(name, int(uid), int(gid), group, groups, comment, home, shell)
-        elif status == 1:
-            return None
-        else:
-            raise PlatformError(status, content)
+        with settings(hide('everything'), warn_only=True):
+            content = self.execute(self.userget_cmd % name, use_sudo=use_sudo)
+            if content.failed:
+                return None
+        name, _, uid, gid, comment, home, shell = content.strip().split(':')
+        with settings(hide('everything')):
+            content = self.execute(self.userget_groups_cmd % name)
+        content = content.strip().split(' ')
+        group, groups = content[ 0 ], set(content[ 1: ])
+        return userstruct(name, int(uid), int(gid), group, groups, comment, home, shell)
 
-    def usermod(self, name, uid=None, group=None, groups=None, home=None, shell=None, comment=None):
+    def usermod(self, name, uid=None, group=None, groups=[], home=None, 
+                shell=None, comment=None, use_sudo=True):
         """Modifies the specified system user."""
-
+        
+        if self.userget(name) is None:
+            return
+        
         options = []
         if uid:
             options.append('-u %d' % uid)
@@ -449,11 +452,8 @@ class BasePlatform(object):
             options.append('-s %s' % shell)
         if comment:
             options.append('-c "%s"' % comment)
-        if groups is not None:
-            if groups:
-                options.append('-G %s' % ','.join(groups))
-            else:
-                options.append('--groups= --')
+        if groups:
+            options.append('-aG %s' % ','.join(groups))
         if options:
             self.execute(self.usermod_cmd % (' '.join(options), name))
 
@@ -473,7 +473,7 @@ class BasePlatform(object):
         return details_incorrect
 
     def usersync(self, name, uid=None, group=None, groups=None,
-                 home=None, shell=None, comment=None):
+                 home=None, shell=None, comment=None, use_sudo=True):
         """Sync the given system user, creating or modifying if needed.
 
         name is required.  uid, group, groups, home, shell, and comment are all
@@ -482,32 +482,26 @@ class BasePlatform(object):
         Return True if the user needed to be created or modified, and False if
         no action was needed.
         """
-        user = self.userget(name)
-        log.debug("syncing system user: %s" % str(user))
+        user = self.userget(name, use_sudo=use_sudo)
         if not user:
-            log.info('syncing system user, user: %s not found, creating' % name)
-            self.useradd(name, uid, group, groups, home, shell, comment)
+            self.useradd(name, uid, group, groups, home, shell, comment, use_sudo=use_sudo)
             return True
         details_incorrect = self.user_incorrect(user, name,
                 uid=uid, group=group, groups=groups, home=home, shell=shell,
                 comment=comment)
         if details_incorrect:
-            log.info('syncing system user, user: %s has incorrect data,'
-                     ' correcting' % name)
-            # make sure group is specified, since it is required by UTD
-            if not details_incorrect.get('group'):
-                details_incorrect['group'] = group
-            self.usermod(name, **details_incorrect)
+            self.usermod(name, use_sudo=use_sudo, **details_incorrect)
             return True
         return False
 
-    def users(self, min_uid=None, max_uid=None):
+    def users(self, min_uid=None, max_uid=None, use_sudo=True):
         """Return a dict of all users: username -> [user_struct, ...]"""
-        status, content = channel.execute(self.users_cmd)
-        if status != 0:
-            raise PlatformError(status, content)
+        with settings(hide('everything'), warn_only=True):
+            content = self.execute(self.users_cmd, use_sudo=use_sudo)
+            if content.failed:
+                raise PlatformError(content)
 
-        users = defaultdict(list)
+        users = {}
         for line in content.splitlines():
             name, _, uid, gid, comment, home, shell = line.strip().split(':')
             uid = int(uid)
@@ -516,11 +510,12 @@ class BasePlatform(object):
                 continue
             if max_uid is not None and uid > max_uid:
                 continue
-            status, content = channel.execute(self.userget_groups_cmd % name)
-            if status != 0:
-                raise PlatformError(status, content)
+            with settings(hide('everything'), warn_only=True):
+                content = self.execute(self.userget_groups_cmd % name, use_sudo=use_sudo)
+                if content.failed:
+                    raise PlatformError(content)
             content = content.strip().split(' ')
             group, groups = content[0], set(content[1:])
-            user = user_struct(name, uid, int(gid), group, groups, comment, home, shell)
-            users[name].append(user)
+            user = userstruct(name, uid, int(gid), group, groups, comment, home, shell)
+            users[name] = user
         return users
