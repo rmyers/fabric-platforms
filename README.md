@@ -63,13 +63,13 @@ Installing fabric on Solaris
 ----------------------------
 Just some notes about getting fabric to build on Solaris. (or pycrypto that is)
 
-#. First install the following packages on Solaris 11
+1. First install the following packages on Solaris 11
    - gmp
    - system/library/math/header-math
    - setuptools-26
-#. Run `sudo easy_install pip` or virtualenv
-#. Create virtualenv or just run pip install like:
+2. Run `sudo easy_install pip` or `sudo easy_install virtualenv`
+3. Create virtualenv or just run pip install like:
 
- 	CFLAGS=-I/usr/include/gmp pip install fabric
+		CFLAGS=-I/usr/include/gmp pip install fabric
 
 Enjoy fabric!
