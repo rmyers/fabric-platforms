@@ -4,6 +4,7 @@ from fabric.state import env
 from fabric.api import run, settings, hide
 
 from linux import Linux
+from solaris import Solaris
 from base import PlatformError
 
 def import_object(dotted_path):
@@ -52,10 +53,11 @@ class Platform(object):
         except KeyError:
             # Try to discover the host platform type:
             with settings(hide('everything'), warn_only=True):
-                output = run('uname -s')
+                output = run('uname -sr')
                 if output.failed:
                     raise PlatformError("Could not determine host type, please register it!")
-                uname = str(output).strip().lower()
+                uname, release = str(output).strip().lower().split()
+                logging.info("Searching for Platform: %s (%s)" % (uname, release))
                 try:
                     platform = self.PLATFORMS[uname]
                     self.register(host, uname)
@@ -76,3 +78,4 @@ platform = Platform()
 
 # Register some default platform classes
 platform.register_platform(Linux)
+platform.register_platform(Solaris)

@@ -99,12 +99,12 @@ class BasePlatform(object):
     """Subclass me to make platform specific changes."""
     
     # filesystem operations
-    chgrp_cmd = '/bin/chgrp %s %s %s'
-    chmod_cmd = '/bin/chmod %s %s %s'
-    chown_cmd = '/bin/chown %s %s%s %s'
+    chgrp_cmd = '/bin/chgrp %(recursive)s %(gid)s %(path)s'
+    chmod_cmd = '/bin/chmod %(recursive)s %(mode)s %(path)s'
+    chown_cmd = '/bin/chown %(recursive)s %(uid)s%(gid)s %(path)s'
     df_cmd = '/bin/df -T'
     digest_cmd = "/usr/bin/sha256sum %s | /bin/gawk '{print $1}'"
-    find_cmd = "/usr/bin/find %s -printf '%%p:%%y:%%m:%%u:%%g:%%l:%%s,%%A@,%%T@,%%C@\n'"
+    find_cmd = "/usr/bin/find %(file)s -printf '%%p:%%y:%%m:%%u:%%g:%%l:%%s,%%A@,%%T@,%%C@\n'"
     hostname_cmd = '/bin/hostname'
     ln_cmd = '/bin/ln -fs %s %s'
     ls_cmd = '/bin/ls -ARl1 --time-style=+%%s %s'
@@ -118,8 +118,10 @@ class BasePlatform(object):
     test_cmd = '/usr/bin/test -e %s'
     test_link_cmd = '/usr/bin/test -h %s'
     touch_cmd = '/bin/touch %s'
-    untar_cmd = '/bin/tar -x%sf %s -C %s'
-    apache_cmd = '/usr/sbin/apache2ctl %s'
+    untar_cmd = '/bin/tar -xf %(file)s -C %(path)s'
+    untar_gz_cmd = '/bin/tar -xzf %(file)s -C %(path)s'
+    untar_bz2_cmd = '/bin/tar -xzf %(file)s -C %(path)s'
+    apache_cmd = '/usr/sbin/apache2ctl %(subcommand)s'
     nginx_cmd = '/usr/sbin/nginx %s'
     byte_compile_cmd = '%s -m compileall %s'
 
@@ -146,7 +148,7 @@ class BasePlatform(object):
     
     def apache(self,  subcommand, use_sudo=False):
         """Executes apachectl command with the passed subcommand."""
-        self.execute(self.apache_cmd % (subcommand))
+        self.execute(self.apache_cmd % {'subcommand': subcommand})
 
     def nginx(self, subcommand, use_sudo=False):
         self.execute(self.nginx_cmd % subcommand, use_sudo=False)
@@ -155,21 +157,26 @@ class BasePlatform(object):
         """Changes the group owner of the specified filesystem path."""
 
         recursive = ('-R' if recursive else '')
-        self.execute(self.chgrp_cmd % (recursive, gid, shell_escape(path)))
+        args = {'recursive': recursive, 'gid': gid, 'path': shell_escape(path)}
+        self.execute(self.chgrp_cmd % args)
 
     def chmod(self, path, mode, recursive=False, use_sudo=False):
         """Changes the permission mode of the specified filesystem path.
         mode can be an int or symbolic mode representation (e.g. g+rw)
         """
-
-        recursive = ('-R' if recursive else '')
-        self.execute(self.chmod_cmd % (recursive, mode, shell_escape(path)))
+        args = {'recursive': '-R' if recursive else '', 
+                'mode': mode, 
+                'path': shell_escape(path)}
+        self.execute(self.chmod_cmd % args)
 
     def chown(self, path, uid, gid=None, recursive=False, use_sudo=False):
         """Changes the user and possibly the group owner of the specified filesystem path."""
-
-        gid, recursive = (':%s' % gid if gid else ''), ('-R' if recursive else '')
-        self.execute(self.chown_cmd % (recursive, uid, gid, shell_escape(path)))
+        args = {
+            'recursive': '-R' if recursive else '',
+            'gid': ':%s' % gid if gid else '',
+            'uid': uid, 
+            'path': shell_escape(path)}
+        self.execute(self.chown_cmd % args)
 
     def hostname(self, use_sudo=False):
         with settings(hide('everything'), warn_only=True):
@@ -255,11 +262,11 @@ class BasePlatform(object):
         path = shell_escape(path)
 
         if file.endswith('bz2'):
-            cmd = self.untar_bz2_cmd % (file, path)
+            cmd = self.untar_bz2_cmd % {'file': file, 'path': path}
         elif file.endswith('gz'):
-            cmd = self.untar_gz_cmd % (file, path)
+            cmd = self.untar_gz_cmd % {'file': file, 'path': path}
         else:
-            cmd = self.untar_cmd % (file, path)
+            cmd = self.untar_cmd % {'file': file, 'path': path}
 
         self.execute(cmd, use_sudo=use_sudo)
 

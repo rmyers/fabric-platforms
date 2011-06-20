@@ -6,8 +6,8 @@ systems with the same commands.
 
 Status
 ------
-Currently only the Linux platform class is available. Darwin and
-Solaris are in the works. FreeBSD and NetBSD should be simple 
+Currently only the Linux and SunOS platform class are available. 
+Darwin is in the works. FreeBSD and NetBSD should be simple 
 and may just work with the linux platform. The sample fabfile.py
 has a few examples on how to use it. Otherwise poke around in
 the source BasePlatform class.
@@ -59,3 +59,17 @@ the sample fabfile.py
 	    print "Dummy user created, %s %s" % (asdf.name, asdf.uid)
 	    platform.userdel('asdfghjk')
 
+Installing fabric on Solaris
+----------------------------
+Just some notes about getting fabric to build on Solaris. (or pycrypto that is)
+
+#. First install the following packages on Solaris 11
+   - gmp
+   - system/library/math/header-math
+   - setuptools-26
+#. Run `sudo easy_install pip` or virtualenv
+#. Create virtualenv or just run pip install like:
+
+ 	CFLAGS=-I/usr/include/gmp pip install fabric
+
+Enjoy fabric!
