@@ -37,7 +37,7 @@ class Platform(object):
         if isinstance(platform, basestring):
             platform = import_object(platform)
         
-        name = getattr(platform, 'names', platform.__name__.lower())
+        name = getattr(platform, 'name', platform.__name__.lower())
         self.PLATFORMS[name] = platform()
     
     def register(self, host, platform_name):
