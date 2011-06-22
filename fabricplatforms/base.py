@@ -108,8 +108,8 @@ class BasePlatform(object):
     hostname_cmd = '/bin/hostname'
     ln_cmd = '/bin/ln -fs %s %s'
     ls_cmd = '/bin/ls -ARl1 --time-style=+%%s %s'
-    mkdir_cmd = '/bin/mkdir %s %s'
-    mv_cmd = '/bin/mv %s %s'
+    mkdir_cmd = '/bin/mkdir %(parents)s %(directory)s'
+    mv_cmd = '/bin/mv %(path)s %(target)s'
     readlink_cmd = '/usr/bin/readlink %s'
     rm_cmd = '/bin/rm %s %s -- %s'
     rmdir_cmd = '/bin/rmdir %s'
@@ -122,8 +122,8 @@ class BasePlatform(object):
     untar_gz_cmd = '/bin/tar -xzf %(file)s -C %(path)s'
     untar_bz2_cmd = '/bin/tar -xzf %(file)s -C %(path)s'
     apache_cmd = '/usr/sbin/apache2ctl %(subcommand)s'
-    nginx_cmd = '/usr/sbin/nginx %s'
-    byte_compile_cmd = '%s -m compileall %s'
+    nginx_cmd = '/usr/sbin/nginx %(subcommand)s'
+    byte_compile_cmd = '%(python_exe)s -m compileall %(path)s'
 
     # user and group operations
     groupadd_cmd = '/usr/sbin/groupadd %(options)s %(group)s'
@@ -151,14 +151,14 @@ class BasePlatform(object):
         self.execute(self.apache_cmd % {'subcommand': subcommand})
 
     def nginx(self, subcommand, use_sudo=False):
-        self.execute(self.nginx_cmd % subcommand, use_sudo=False)
+        self.execute(self.nginx_cmd % {'subcommand': subcommand}, use_sudo)
 
     def chgrp(self, path, gid, recursive=False, use_sudo=False):
         """Changes the group owner of the specified filesystem path."""
 
         recursive = ('-R' if recursive else '')
         args = {'recursive': recursive, 'gid': gid, 'path': shell_escape(path)}
-        self.execute(self.chgrp_cmd % args)
+        self.execute(self.chgrp_cmd % args, use_sudo)
 
     def chmod(self, path, mode, recursive=False, use_sudo=False):
         """Changes the permission mode of the specified filesystem path.
@@ -167,7 +167,7 @@ class BasePlatform(object):
         args = {'recursive': '-R' if recursive else '', 
                 'mode': mode, 
                 'path': shell_escape(path)}
-        self.execute(self.chmod_cmd % args)
+        self.execute(self.chmod_cmd % args, use_sudo)
 
     def chown(self, path, uid, gid=None, recursive=False, use_sudo=False):
         """Changes the user and possibly the group owner of the specified filesystem path."""
@@ -176,11 +176,11 @@ class BasePlatform(object):
             'gid': ':%s' % gid if gid else '',
             'uid': uid, 
             'path': shell_escape(path)}
-        self.execute(self.chown_cmd % args)
+        self.execute(self.chown_cmd % args, use_sudo)
 
     def hostname(self, use_sudo=False):
         with settings(hide('everything'), warn_only=True):
-            hostname = self.execute(self.hostname_cmd)
+            hostname = self.execute(self.hostname_cmd, use_sudo)
         return hostname or "Unknown"
 
     def link(self, target, path, absolute=False, use_sudo=False):
@@ -192,21 +192,21 @@ class BasePlatform(object):
             target = tail
         
         with cd(head):
-            self.execute(self.ln_cmd % (target, path), use_sudo=use_sudo)
+            self.execute(self.ln_cmd % (target, path), use_sudo)
 
 
 
 
     def mkdir(self, path, parents=False, use_sudo=False):
         """Creates the specified directory."""
-        parents = parents and '-p' or ''
-        self.execute(self.mkdir_cmd % (parents, shell_escape(path)), use_sudo=use_sudo)
+        args = {'parents': '-p' if parents else '', 
+                'directory': shell_escape(path)}
+        self.execute(self.mkdir_cmd % args, use_sudo)
 
     def move(self, path, target, use_sudo=False):
         """Moves the specified filesystem path to the specified target."""
-
-        self.execute(self.mv_cmd % (shell_escape(path),
-                                    shell_escape(target)), use_sudo=use_sudo)
+        args = {'path': shell_escape(path), 'target': shell_escape(target)}
+        self.execute(self.mv_cmd % args, use_sudo)
 
     def remove(self, path, recursive=False, force=False, link=False, use_sudo=False):
         """Removes the specified filesystem path."""
@@ -242,7 +242,7 @@ class BasePlatform(object):
             return filenode(path, mode, user, group, *values)
         elif filetype.lower() == 'symbolic link':
             with settings(hide('everything'), warn_only=True):
-                target = self.execute(self.readlink_cmd % path, use_sudo=use_sudo)
+                target = self.execute(self.readlink_cmd % path, use_sudo)
             return filenode(path, mode, user, group, *values, ftype='link', target=target.strip())
         else:
             return filenode(path, mode, user, group, *values, ftype=filetype)
@@ -268,16 +268,16 @@ class BasePlatform(object):
         else:
             cmd = self.untar_cmd % {'file': file, 'path': path}
 
-        self.execute(cmd, use_sudo=use_sudo)
+        self.execute(cmd, use_sudo)
 
     def byte_compile(self, python_exe, path, use_sudo=False):
         """
         Byte compile all the code in a directory.
         Useful for speeding the initial load times of wsgi apps.
         """
-        python_exe = shell_escape(python_exe)
-        path = shell_escape(path)
-        self.execute(self.byte_compile_cmd % (python_exe, path), use_sudo=use_sudo)
+        args = {'python_exe': shell_escape(python_exe),
+                'path': shell_escape(path)}
+        self.execute(self.byte_compile_cmd % args, use_sudo)
     
 
     def _attrs_incorrect(self, obj, new_attrs):
@@ -463,12 +463,12 @@ class BasePlatform(object):
         """Gets information on the specified system user."""
 
         with settings(hide('everything'), warn_only=True):
-            content = self.execute(self.userget_cmd % name, use_sudo=use_sudo)
+            content = self.execute(self.userget_cmd % {'name': name}, use_sudo)
             if content.failed:
                 return None
         name, _, uid, gid, comment, home, shell = content.strip().split(':')
         with settings(hide('everything')):
-            content = self.execute(self.userget_groups_cmd % name)
+            content = self.execute(self.userget_groups_cmd % {'name': name})
         content = content.strip().split(' ')
         group, groups = content[ 0 ], set(content[ 1: ])
         return userstruct(name, int(uid), int(gid), group, groups, comment, home, shell)
@@ -497,7 +497,7 @@ class BasePlatform(object):
             options.append('-aG %s' % ','.join(groups))
         if options:
             cmd = self.usermod_cmd % {'options': ' '.join(options), 'name': name}
-            self.execute(cmd, use_sudo=use_sudo)
+            self.execute(cmd, use_sudo)
 
     def user_incorrect(self, user, name, **new_attrs):
         """Determine which user attributes given are not correct.
