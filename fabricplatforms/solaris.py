@@ -16,8 +16,8 @@ class Solaris(BasePlatform):
     # This is gnu find for solaris 5.11 
     find_cmd = "/usr/gnu/bin/find %(file)s -printf '%%p:%%y:%%m:%%u:%%g:%%l:%%s,%%A@,%%T@,%%C@\n'"
     
-    groupget_cmd = '/usr/bin/grep ^%s: /etc/group'
+    groupget_cmd = '/usr/bin/grep ^%(group)s: /etc/group'
     groups_cmd = '/usr/bin/cat /etc/group'
-    userget_cmd = '/usr/bin/grep ^%s: /etc/passwd'
+    userget_cmd = '/usr/bin/grep ^%(user)s: /etc/passwd'
     users_cmd = '/usr/bin/cat /etc/passwd'
     # TODO: Check on solaris 5.10 and lower for other problems

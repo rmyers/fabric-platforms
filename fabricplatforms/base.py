@@ -126,16 +126,16 @@ class BasePlatform(object):
     byte_compile_cmd = '%s -m compileall %s'
 
     # user and group operations
-    groupadd_cmd = '/usr/sbin/groupadd -g %d %s'
-    groupdel_cmd = '/usr/sbin/groupdel %s'
-    groupget_cmd = '/bin/grep ^%s: /etc/group'
-    groupmod_cmd = '/usr/sbin/groupmod -g %d %s'
+    groupadd_cmd = '/usr/sbin/groupadd %(options)s %(group)s'
+    groupdel_cmd = '/usr/sbin/groupdel %(group)s'
+    groupget_cmd = '/bin/grep ^%(group)s: /etc/group'
+    groupmod_cmd = '/usr/sbin/groupmod %(options)s %(group)s'
     groups_cmd = '/bin/cat /etc/group'
-    useradd_cmd = '/usr/sbin/useradd -u %d -m %s %s'
-    userdel_cmd = '/usr/sbin/userdel -r %s'
-    userget_cmd = '/bin/grep ^%s: /etc/passwd'
-    userget_groups_cmd = '/usr/bin/id -Gn %s'
-    usermod_cmd = '/usr/sbin/usermod %s %s'
+    useradd_cmd = '/usr/sbin/useradd %(options)s %(name)s'
+    userdel_cmd = '/usr/sbin/userdel -r %(name)s'
+    userget_cmd = '/bin/grep ^%(name)s: /etc/passwd'
+    userget_groups_cmd = '/usr/bin/id -Gn %(name)s'
+    usermod_cmd = '/usr/sbin/usermod %(options)s %(name)s'
     users_cmd = '/bin/cat /etc/passwd'
     
     def execute(self, cmd, use_sudo=False):
@@ -311,11 +311,15 @@ class BasePlatform(object):
     # Group methods.
     #
 
-    def groupadd(self, name, gid, members=[], use_sudo=True):
+    def groupadd(self, group, gid=None, members=[], use_sudo=True):
         """Creates the specified system group."""
-        self.execute(self.groupadd_cmd % (gid, name), use_sudo=use_sudo)
+        options = []
+        if gid:
+            options.append('-g %d' % gid)
+        cmd = self.groupadd_cmd % {'options': ' '.join(options), 'group': group}
+        self.execute(cmd, use_sudo=use_sudo)
         for member in members:
-            self.usermod(member, groups=[name])
+            self.usermod(member, groups=[group])
 
     def groupdel(self, name, use_sudo=True):
         """
@@ -327,20 +331,30 @@ class BasePlatform(object):
             return
         self.execute(self.groupdel_cmd % name, use_sudo=use_sudo)
 
-    def groupget(self, name, use_sudo=True):
+    def groupget(self, group, use_sudo=True):
         """Gets information on the specified system group."""
 
         with settings(hide('everything'), warn_only=True):
-            content = self.execute(self.groupget_cmd % name)
+            cmd = self.groupget_cmd % {'group': group}
+            content = self.execute(cmd, use_sudo=use_sudo)
             if content.failed or not content:
                 return None
         name, _, gid, users = content.strip().split(':')
         return groupstruct(name, int(gid), users.split(',') if users else [])
 
-    def groupmod(self, name, gid, use_sudo=True):
+    def groupmod(self, group, gid=None, new_name=None, members=[], use_sudo=True):
         """Modifies the specified system group."""
+        options = []
+        if gid:
+            options.append('-g %d' % gid)
+        if new_name:
+            options.append('-n %s' % new_name)
+        if options:
+            cmd = self.groupmod_cmd % {'options': ' '.join(options), 'group': group}
+            self.execute(cmd, use_sudo=use_sudo)
+        for member in members:
+            self.usermod(member, groups=[group])
 
-        self.execute(self.groupmod_cmd % (gid, name))
 
     def group_incorrect(self, group, name, **new_attrs):
         """Determine which group attributes given are not correct.
@@ -397,11 +411,29 @@ class BasePlatform(object):
     # User methods.
     #
 
-    def useradd(self, name, uid, group=None, groups=None, home=None, 
-                shell=None, comment=None, use_sudo=True):
-        """Creates the specified system user."""
+    def useradd(self, name, uid=None, group=None, groups=None, home=None, 
+                shell=None, comment=None, create_home=False, use_sudo=True):
+        """
+        Creates the specified system user.
+        
+        Arguments:
+        * name: Username of the user (required)
+        * uid: Integer value of UID for user (optional)
+        * group: String of integer of default GID for user (optional)
+        * groups: List of groups to add user to (optional)
+        * home: Path of user home directory (optional)
+        * shell: Default shell (optional)
+        * comment: GECOS comment for user (optional)
+        * create_home: Tell the useradd command to create the home
+          directory (optional)
+        * use_sudo (bool): Use sudo for this command. (True)
+        """
 
         options = []
+        if create_home:
+            options.append('-m')
+        if uid:
+            options.append('-u %d' % uid)
         if group:
             options.append('-g %s' % group)
         if groups:
@@ -413,7 +445,7 @@ class BasePlatform(object):
         if comment:
             options.append('-c "%s"' % comment)
         
-        cmd = self.useradd_cmd % (uid, ' '.join(options), name)
+        cmd = self.useradd_cmd % {'options': options, 'name': name}
         
         self.execute(cmd, use_sudo=use_sudo)
 
@@ -442,13 +474,15 @@ class BasePlatform(object):
         return userstruct(name, int(uid), int(gid), group, groups, comment, home, shell)
 
     def usermod(self, name, uid=None, group=None, groups=[], home=None, 
-                shell=None, comment=None, use_sudo=True):
+                shell=None, comment=None, create_home=False, use_sudo=True):
         """Modifies the specified system user."""
         
         if self.userget(name) is None:
             return
         
         options = []
+        if create_home:
+            options.append('-m')
         if uid:
             options.append('-u %d' % uid)
         if group:
@@ -462,7 +496,8 @@ class BasePlatform(object):
         if groups:
             options.append('-aG %s' % ','.join(groups))
         if options:
-            self.execute(self.usermod_cmd % (' '.join(options), name))
+            cmd = self.usermod_cmd % {'options': ' '.join(options), 'name': name}
+            self.execute(cmd, use_sudo=use_sudo)
 
     def user_incorrect(self, user, name, **new_attrs):
         """Determine which user attributes given are not correct.
@@ -480,7 +515,8 @@ class BasePlatform(object):
         return details_incorrect
 
     def usersync(self, name, uid=None, group=None, groups=None,
-                 home=None, shell=None, comment=None, use_sudo=True):
+                 home=None, shell=None, comment=None, create_home=False, 
+                 use_sudo=True):
         """Sync the given system user, creating or modifying if needed.
 
         name is required.  uid, group, groups, home, shell, and comment are all
@@ -491,7 +527,8 @@ class BasePlatform(object):
         """
         user = self.userget(name, use_sudo=use_sudo)
         if not user:
-            self.useradd(name, uid, group, groups, home, shell, comment, use_sudo=use_sudo)
+            self.useradd(name, uid, group, groups, home, shell, comment, 
+                         create_home, use_sudo)
             return True
         details_incorrect = self.user_incorrect(user, name,
                 uid=uid, group=group, groups=groups, home=home, shell=shell,
