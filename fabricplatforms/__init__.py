@@ -5,6 +5,7 @@ from fabric.api import run, settings, hide
 
 from linux import Linux
 from solaris import Solaris
+from darwin import Darwin
 from base import PlatformError
 
 def import_object(dotted_path):
@@ -79,3 +80,4 @@ platform = Platform()
 # Register some default platform classes
 platform.register_platform(Linux)
 platform.register_platform(Solaris)
+platform.register_platform(Darwin)
