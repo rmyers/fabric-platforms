@@ -1,63 +1,14 @@
 from __future__ import with_statement
 
-from collections import defaultdict
-
 import os
 
 from fabric.api import run, sudo, cd, settings, hide
 
+from common.utils import shell_escape
+from common.filesystem import dirnode, filenode
+
 class PlatformError(Exception):
     pass
-
-class dirnode(object):
-    """Directory helper object for storing results from stat and find commands."""
-
-    def __init__(self, path, mode = None, user = None, group = None, size = None,
-        atime = None, mtime = None, ctime = None):
-        """Constructor."""
-
-        self.atime = atime
-        self.container = '%s/' % os.path.dirname(path.rstrip('/'))
-        self.ctime = ctime
-        self.dirs = {}
-        self.files = {}
-        self.group = group
-        self.mode = mode
-        self.mtime = mtime
-        self.name = '%s/' % os.path.basename(path.rstrip('/'))
-        self.path = '%s/' % path.rstrip('/')
-        self.size = size
-        self.ftype = 'directory'
-        self.user = user
-
-    def __getattr__(self, name):
-        """Acquires the specified attribute."""
-        try:
-            return self.files[ name ]
-        except KeyError:
-            try:
-                return self.dirs[ name ]
-            except KeyError:
-                raise AttributeError("'dirnode' object has no attribute '%s'" % name)
-
-class filenode(object):
-    """File helper object for storing results from stat and find commands."""
-
-    def __init__(self, path, mode=None, user=None, group=None, size=None, 
-                 atime=None, mtime=None, ctime=None, **parameters):
-        self.atime = atime
-        self.ctime = ctime
-        self.container = '%s/' % os.path.dirname(path)
-        self.digest = parameters.get('digest', None)
-        self.group = group
-        self.mode = mode
-        self.mtime = mtime
-        self.name = os.path.basename(path)
-        self.path = path
-        self.size = size
-        self.target = parameters.get('target', None)
-        self.ftype = parameters.get('ftype', 'file')
-        self.user = user
 
 class groupstruct(object):
     """Group helper object for storing groupget results."""
@@ -77,23 +28,6 @@ class userstruct(object):
         self.comment = comment
         self.home = home
         self.shell = shell
-
-def shell_escape(text):
-    """
-    Escape the passed text for use in the shell (Bash).
-    The output text will be enclosed in double quotes.
-    """
-    if not text:
-        return '""'
-    # We need to escape special characters for bash, and in
-    # Python, two backslashes represent one literal backslash.
-    # Escape backslashes first, otherwise you would end up escaping the
-    # other special characters' escape backslash.
-    text = text.replace("\\", "\\\\")
-    text = text.replace("$", "\\$")
-    text = text.replace("`", "\\`")
-    text = text.replace('"', '\\"')
-    return '"%s"' % text
 
 class BasePlatform(object):
     """Subclass me to make platform specific changes."""
@@ -250,7 +184,7 @@ class BasePlatform(object):
 
     def touch(self, path, use_sudo=False):
         """Touches the specified filesystem path."""
-        self.execute(self.touch_cmd % shell_escape(path), use_sudo=use_sudo)
+        self.execute(self.touch_cmd % shell_escape(path), use_sudo)
 
     def untar(self, file, path=None, use_sudo=False):
         """Untar a file into path. If Path is None will untar in place."""
@@ -317,9 +251,9 @@ class BasePlatform(object):
         if gid:
             options.append('-g %d' % gid)
         cmd = self.groupadd_cmd % {'options': ' '.join(options), 'group': group}
-        self.execute(cmd, use_sudo=use_sudo)
+        self.execute(cmd, use_sudo)
         for member in members:
-            self.usermod(member, groups=[group])
+            self.usermod(member, groups=[group], use_sudo=use_sudo)
 
     def groupdel(self, name, use_sudo=True):
         """
@@ -329,14 +263,14 @@ class BasePlatform(object):
         group = self.groupget(name)
         if not group:
             return
-        self.execute(self.groupdel_cmd % name, use_sudo=use_sudo)
+        self.execute(self.groupdel_cmd % name, use_sudo)
 
     def groupget(self, group, use_sudo=True):
         """Gets information on the specified system group."""
 
         with settings(hide('everything'), warn_only=True):
             cmd = self.groupget_cmd % {'group': group}
-            content = self.execute(cmd, use_sudo=use_sudo)
+            content = self.execute(cmd, use_sudo)
             if content.failed or not content:
                 return None
         name, _, gid, users = content.strip().split(':')
@@ -351,9 +285,9 @@ class BasePlatform(object):
             options.append('-n %s' % new_name)
         if options:
             cmd = self.groupmod_cmd % {'options': ' '.join(options), 'group': group}
-            self.execute(cmd, use_sudo=use_sudo)
+            self.execute(cmd, use_sudo)
         for member in members:
-            self.usermod(member, groups=[group])
+            self.usermod(member, groups=[group], use_sudo=use_sudo)
 
 
     def group_incorrect(self, group, name, **new_attrs):
@@ -388,14 +322,14 @@ class BasePlatform(object):
         details_incorrect = self.group_incorrect(group, name,
                                                  gid=gid, members=members)
         if details_incorrect:
-            self.groupmod(name, **details_incorrect)
+            self.groupmod(name, use_sudo=use_sudo, **details_incorrect)
             return True
         return False
 
     def groups(self, use_sudo=False):
         """Return a dict of all groups: groupname -> [group_struct, ...]"""
         with settings(hide('everything'), warn_only=True):
-            content = self.execute(self.groups_cmd, use_sudo=use_sudo)
+            content = self.execute(self.groups_cmd, use_sudo)
             if content.failed:
                 raise PlatformError(content)
 
@@ -447,7 +381,7 @@ class BasePlatform(object):
         
         cmd = self.useradd_cmd % {'options': options, 'name': name}
         
-        self.execute(cmd, use_sudo=use_sudo)
+        self.execute(cmd, use_sudo)
 
     def userdel(self, name, use_sudo=True):
         """
@@ -457,7 +391,7 @@ class BasePlatform(object):
         user = self.userget(name)
         if not user:
             return
-        self.execute(self.userdel_cmd % name, use_sudo=use_sudo)
+        self.execute(self.userdel_cmd % name, use_sudo)
 
     def userget(self, name, use_sudo=True):
         """Gets information on the specified system user."""
@@ -468,14 +402,28 @@ class BasePlatform(object):
                 return None
         name, _, uid, gid, comment, home, shell = content.strip().split(':')
         with settings(hide('everything')):
-            content = self.execute(self.userget_groups_cmd % {'name': name})
+            content = self.execute(self.userget_groups_cmd % {'name': name}, use_sudo)
         content = content.strip().split(' ')
         group, groups = content[ 0 ], set(content[ 1: ])
         return userstruct(name, int(uid), int(gid), group, groups, comment, home, shell)
 
     def usermod(self, name, uid=None, group=None, groups=[], home=None, 
                 shell=None, comment=None, create_home=False, use_sudo=True):
-        """Modifies the specified system user."""
+        """
+        Modifies the specified system user.
+        
+        Arguments:
+        * name: Username of the user (required)
+        * uid: Integer value of UID for user (optional)
+        * group: String of integer of default GID for user (optional)
+        * groups: List of groups to add user to (optional)
+        * home: Path of user home directory (optional)
+        * shell: Default shell (optional)
+        * comment: GECOS comment for user (optional)
+        * create_home: Tell the useradd command to create the home
+          directory (optional)
+        * use_sudo (bool): Use sudo for this command. (True)
+        """
         
         if self.userget(name) is None:
             return
@@ -539,7 +487,12 @@ class BasePlatform(object):
         return False
 
     def users(self, min_uid=None, max_uid=None, use_sudo=True):
-        """Return a dict of all users: username -> [user_struct, ...]"""
+        """
+        Return a dict of all users::
+        
+            {'user1':  userstruct(user1), 'user2':  userstruct(user2)}
+        
+        """
         with settings(hide('everything'), warn_only=True):
             content = self.execute(self.users_cmd, use_sudo=use_sudo)
             if content.failed:
